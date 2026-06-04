@@ -1,0 +1,5 @@
+{"type":"session_meta","payload":{"id":"11111111-1111-1111-1111-111111111111","thread_name":"Fixture idle","model":"gpt-fixture"}}
+{"type":"event_msg","payload":{"type":"task_started"}}
+{"type":"event_msg","payload":{"type":"token_count","total_tokens":42,"rate_limits":{"primary":{"window_minutes":300,"used_percent":12,"resets_at":1780556400},"secondary":{"window_minutes":10080,"used_percent":34,"resets_at":1781074800}}}}
+{"type":"event_msg","payload":{"type":"task_complete"}}
+
