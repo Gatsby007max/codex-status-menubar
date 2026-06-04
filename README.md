@@ -2,6 +2,8 @@
 
 Codex Status Menubar is a tiny native macOS utility that watches local Codex Desktop state and shows the latest thread status, token count, and rate-limit remaining values in the menu bar.
 
+![Codex Status Menubar preview](assets/preview.svg)
+
 The app is external and read-only. It does not modify `Codex.app`, Pet files, bundled Codex files, or existing Codex state.
 
 ## Features
@@ -147,4 +149,3 @@ When uncertain, the detector prefers `Idle` over `Waiting`.
 This directory is intended to be publishable as a small standalone project. Commit source, scripts, docs, `.gitignore`, and the app bundle `Info.plist` template. Do not commit compiler caches or generated binaries.
 
 See `PUBLISHING.md` for the final GitHub upload checklist.
-
