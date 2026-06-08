@@ -79,6 +79,8 @@ struct RateLimitSnapshot {
 
 struct ParsedSession {
     let validLineCount: Int
+    let totalLineCount: Int
+    let endedWithNewline: Bool
     let recognizedEvents: [RecognizedEvent]
     let latestDate: Date?
     let title: String?
@@ -232,6 +234,17 @@ final class StatusCollector {
             debug.append("Using cached parse for \(url.path)")
             return cached.parsed
         }
+        if let cached = parsedCache[url.path],
+           let oldSize = cached.signature.fileSize,
+           let newSize = signature.fileSize,
+           newSize > oldSize,
+           cached.parsed.endedWithNewline {
+            debug.append("Using incremental parse for \(url.path), appended bytes: \(newSize - oldSize)")
+            let appended = parseSession(url, fromOffset: UInt64(oldSize), baseLineIndex: cached.parsed.totalLineCount, debug: &debug)
+            let merged = mergeParsedSession(cached.parsed, appended: appended)
+            parsedCache[url.path] = (signature, merged)
+            return merged
+        }
         let parsed = parseSession(url, debug: &debug)
         parsedCache[url.path] = (signature, parsed)
         return parsed
@@ -242,12 +255,15 @@ final class StatusCollector {
         return FileSignature(path: url.path, modificationDate: values?.contentModificationDate, fileSize: values?.fileSize)
     }
 
-    private func parseSession(_ url: URL, debug: inout [String]) -> ParsedSession {
+    private func parseSession(_ url: URL, fromOffset offset: UInt64 = 0, baseLineIndex: Int = 0, debug: inout [String]) -> ParsedSession {
         guard let handle = try? FileHandle(forReadingFrom: url) else {
             debug.append("Unreadable session file: \(url.path)")
-            return ParsedSession(validLineCount: 0, recognizedEvents: [], latestDate: nil, title: nil, model: nil, tokens: nil, rateLimits: nil)
+            return ParsedSession(validLineCount: 0, totalLineCount: 0, endedWithNewline: true, recognizedEvents: [], latestDate: nil, title: nil, model: nil, tokens: nil, rateLimits: nil)
         }
         defer { try? handle.close() }
+        if offset > 0 {
+            try? handle.seek(toOffset: offset)
+        }
 
         var validLineCount = 0
         var recognized: [RecognizedEvent] = []
@@ -259,7 +275,9 @@ final class StatusCollector {
         var latestRateLimitLine: Int?
         var buffer = Data()
         let newline = Data([0x0A])
-        var lineIndex = 0
+        var lineIndex = baseLineIndex
+        var sawAnyData = false
+        var endedWithNewline = true
 
         func processLine(_ lineData: Data, index: Int) {
             guard let line = String(data: lineData, encoding: .utf8),
@@ -297,6 +315,8 @@ final class StatusCollector {
             guard let chunk = try? handle.read(upToCount: 64 * 1024), !chunk.isEmpty else {
                 break
             }
+            sawAnyData = true
+            endedWithNewline = chunk.last == 0x0A
             buffer.append(chunk)
             while let range = buffer.firstRange(of: newline) {
                 let lineData = buffer.subdata(in: buffer.startIndex..<range.lowerBound)
@@ -307,6 +327,10 @@ final class StatusCollector {
         }
         if !buffer.isEmpty {
             processLine(buffer, index: lineIndex)
+            lineIndex += 1
+        }
+        if !sawAnyData {
+            endedWithNewline = true
         }
 
         if debugEnabled {
@@ -318,7 +342,27 @@ final class StatusCollector {
             }
         }
 
-        return ParsedSession(validLineCount: validLineCount, recognizedEvents: recognized, latestDate: latestDate, title: title, model: model, tokens: tokens, rateLimits: rateLimits)
+        return ParsedSession(validLineCount: validLineCount, totalLineCount: lineIndex - baseLineIndex, endedWithNewline: endedWithNewline, recognizedEvents: recognized, latestDate: latestDate, title: title, model: model, tokens: tokens, rateLimits: rateLimits)
+    }
+
+    private func mergeParsedSession(_ existing: ParsedSession, appended: ParsedSession) -> ParsedSession {
+        let latestDate: Date?
+        if let existingDate = existing.latestDate, let appendedDate = appended.latestDate {
+            latestDate = max(existingDate, appendedDate)
+        } else {
+            latestDate = appended.latestDate ?? existing.latestDate
+        }
+        return ParsedSession(
+            validLineCount: existing.validLineCount + appended.validLineCount,
+            totalLineCount: existing.totalLineCount + appended.totalLineCount,
+            endedWithNewline: appended.endedWithNewline,
+            recognizedEvents: existing.recognizedEvents + appended.recognizedEvents,
+            latestDate: latestDate,
+            title: appended.title ?? existing.title,
+            model: appended.model ?? existing.model,
+            tokens: appended.tokens ?? existing.tokens,
+            rateLimits: appended.rateLimits ?? existing.rateLimits
+        )
     }
 
     private func collectFields(from value: Any, path: String, into fields: inout [FieldValue]) {

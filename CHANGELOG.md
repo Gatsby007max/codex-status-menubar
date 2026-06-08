@@ -12,3 +12,5 @@
 - Added GitHub-ready documentation, fixtures, CI, and verification script.
 - Moved periodic status collection off the AppKit main thread to avoid UI freezes while
   scanning larger local Codex session files.
+- Added incremental parsing for appended session JSONL data to avoid reparsing the full
+  active session file on each refresh.
