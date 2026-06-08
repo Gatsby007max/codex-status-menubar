@@ -708,8 +708,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let collector: StatusCollector
     private let debugEnabled: Bool
     private let pollInterval: TimeInterval
+    private let collectorQueue = DispatchQueue(label: "local.codex-status-menubar.collector", qos: .utility)
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private var pollingTimer: DispatchSourceTimer?
+    private var isRefreshInFlight = false
+    private var pendingRefreshAfterCurrent = false
     private var lastSnapshot: StatusSnapshot?
     private var lastDisplayedStopKey: String?
     private var petBubbleWindow: NSPanel?
@@ -728,6 +731,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApplication.shared.setActivationPolicy(.accessory)
+        statusItem.button?.title = "Codex: Loading"
         refresh()
         startPolling()
     }
@@ -735,7 +739,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func startPolling() {
         let timer = DispatchSource.makeTimerSource(queue: DispatchQueue.main)
         timer.schedule(deadline: .now() + pollInterval, repeating: pollInterval, leeway: .milliseconds(250))
-        timer.setEventHandler { [weak self] in self?.refresh() }
+        timer.setEventHandler { [weak self] in self?.scheduleRefresh(queueIfBusy: false) }
         timer.resume()
         pollingTimer = timer
     }
@@ -752,7 +756,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func refresh() {
-        let (snapshot, debugLines) = collector.collect()
+        scheduleRefresh(queueIfBusy: true)
+    }
+
+    private func scheduleRefresh(queueIfBusy: Bool) {
+        guard !isRefreshInFlight else {
+            if queueIfBusy {
+                pendingRefreshAfterCurrent = true
+            }
+            return
+        }
+
+        isRefreshInFlight = true
+        collectorQueue.async { [weak self] in
+            guard let self else { return }
+            let (snapshot, debugLines) = self.collector.collect()
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.isRefreshInFlight = false
+                self.apply(snapshot: snapshot, debugLines: debugLines)
+                if self.pendingRefreshAfterCurrent {
+                    self.pendingRefreshAfterCurrent = false
+                    self.scheduleRefresh(queueIfBusy: false)
+                }
+            }
+        }
+    }
+
+    private func apply(snapshot: StatusSnapshot, debugLines: [String]) {
         let previousSnapshot = lastSnapshot
         if debugEnabled { writeDebug(debugLines) }
         configureStatusButton(for: snapshot)

@@ -10,4 +10,5 @@
 - Added pseudo desktop widget toggle.
 - Added Pet-style stop text bubble.
 - Added GitHub-ready documentation, fixtures, CI, and verification script.
-
+- Moved periodic status collection off the AppKit main thread to avoid UI freezes while
+  scanning larger local Codex session files.
