@@ -1,0 +1,5 @@
+{"type":"session_meta","payload":{"id":"44444444-4444-4444-4444-444444444444","thread_name":"Fixture user thread","model":"gpt-fixture","thread_source":"user"}}
+{"type":"event_msg","payload":{"type":"task_started"}}
+{"type":"event_msg","payload":{"type":"token_count","total_tokens":21,"rate_limits":{"primary":{"window_minutes":300,"used_percent":50},"secondary":{"window_minutes":10080,"used_percent":25}}}}
+{"type":"event_msg","payload":{"type":"task_complete"}}
+

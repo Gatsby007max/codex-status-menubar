@@ -1,0 +1,4 @@
+{"type":"session_meta","payload":{"id":"55555555-5555-5555-5555-555555555555","parent_thread_id":"44444444-4444-4444-4444-444444444444","thread_source":"subagent","source":{"subagent":{"other":"guardian"}},"model":"codex-auto-review"}}
+{"type":"event_msg","payload":{"type":"task_started"}}
+{"type":"event_msg","payload":{"type":"agent_message","role":"assistant"}}
+{"type":"event_msg","payload":{"type":"token_count","total_tokens":99}}

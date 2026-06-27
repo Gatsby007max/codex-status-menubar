@@ -14,3 +14,5 @@
   scanning larger local Codex session files.
 - Added incremental parsing for appended session JSONL data to avoid reparsing the full
   active session file on each refresh.
+- Skipped internal Codex subagent review sessions when choosing the latest user-facing
+  thread after newer Codex Desktop updates.

@@ -81,6 +81,8 @@ struct ParsedSession {
     let validLineCount: Int
     let totalLineCount: Int
     let endedWithNewline: Bool
+    let titleLookupID: String?
+    let isInternalSubagent: Bool
     let recognizedEvents: [RecognizedEvent]
     let latestDate: Date?
     let title: String?
@@ -141,15 +143,20 @@ final class StatusCollector {
             guard parsed.validLineCount > 0 else {
                 continue
             }
+            if parsed.isInternalSubagent {
+                debug.append("Skipping internal subagent session: \(candidate.url.path)")
+                continue
+            }
 
             debug.append("Selected session: \(candidate.url.path) [mtime_first]")
             let detection = StatusDetector.detect(events: parsed.recognizedEvents, latestDate: parsed.latestDate)
             debug.append("Status reason: \(detection.reason)")
             let lastActivity = detection.lastActivityDate ?? parsed.latestDate ?? candidate.modificationDate
+            let threadTitle = candidate.title ?? parsed.title ?? parsed.titleLookupID.flatMap { titleIndex[$0] } ?? "Unknown"
 
             return (StatusSnapshot(
                 status: detection.status,
-                threadTitle: candidate.title ?? parsed.title ?? "Unknown",
+                threadTitle: threadTitle,
                 model: parsed.model ?? "Unknown",
                 tokens: parsed.tokens ?? "Unknown",
                 rateLimitRemaining: parsed.rateLimits?.remaining ?? "Unknown",
@@ -258,7 +265,7 @@ final class StatusCollector {
     private func parseSession(_ url: URL, fromOffset offset: UInt64 = 0, baseLineIndex: Int = 0, debug: inout [String]) -> ParsedSession {
         guard let handle = try? FileHandle(forReadingFrom: url) else {
             debug.append("Unreadable session file: \(url.path)")
-            return ParsedSession(validLineCount: 0, totalLineCount: 0, endedWithNewline: true, recognizedEvents: [], latestDate: nil, title: nil, model: nil, tokens: nil, rateLimits: nil)
+            return ParsedSession(validLineCount: 0, totalLineCount: 0, endedWithNewline: true, titleLookupID: nil, isInternalSubagent: false, recognizedEvents: [], latestDate: nil, title: nil, model: nil, tokens: nil, rateLimits: nil)
         }
         defer { try? handle.close() }
         if offset > 0 {
@@ -269,6 +276,8 @@ final class StatusCollector {
         var recognized: [RecognizedEvent] = []
         var latestDate: Date?
         var title: String?
+        var titleLookupID: String?
+        var isInternalSubagent = false
         var model: String?
         var tokens: String?
         var rateLimits: RateLimitSnapshot?
@@ -297,7 +306,11 @@ final class StatusCollector {
             }
 
             title = title ?? stringField(fields, keys: ["thread_name", "title"])
+            titleLookupID = titleLookupID ?? firstStringField(fields, orderedKeys: ["parent_thread_id", "thread_id", "session_id", "id"])
             model = model ?? stringField(fields, keys: ["model"])
+            if isInternalSubagentMarker(fields: fields) {
+                isInternalSubagent = true
+            }
             if let latestTokens = latestTokenCount(fields: fields) {
                 tokens = latestTokens
             }
@@ -342,7 +355,7 @@ final class StatusCollector {
             }
         }
 
-        return ParsedSession(validLineCount: validLineCount, totalLineCount: lineIndex - baseLineIndex, endedWithNewline: endedWithNewline, recognizedEvents: recognized, latestDate: latestDate, title: title, model: model, tokens: tokens, rateLimits: rateLimits)
+        return ParsedSession(validLineCount: validLineCount, totalLineCount: lineIndex - baseLineIndex, endedWithNewline: endedWithNewline, titleLookupID: titleLookupID, isInternalSubagent: isInternalSubagent, recognizedEvents: recognized, latestDate: latestDate, title: title, model: model, tokens: tokens, rateLimits: rateLimits)
     }
 
     private func mergeParsedSession(_ existing: ParsedSession, appended: ParsedSession) -> ParsedSession {
@@ -356,6 +369,8 @@ final class StatusCollector {
             validLineCount: existing.validLineCount + appended.validLineCount,
             totalLineCount: existing.totalLineCount + appended.totalLineCount,
             endedWithNewline: appended.endedWithNewline,
+            titleLookupID: appended.titleLookupID ?? existing.titleLookupID,
+            isInternalSubagent: existing.isInternalSubagent || appended.isInternalSubagent,
             recognizedEvents: existing.recognizedEvents + appended.recognizedEvents,
             latestDate: latestDate,
             title: appended.title ?? existing.title,
@@ -382,6 +397,18 @@ final class StatusCollector {
                 fields.append(FieldValue(path: path, key: key, stringValue: "\(number)", numberValue: number.doubleValue))
             }
         }
+    }
+
+    private func isInternalSubagentMarker(fields: [FieldValue]) -> Bool {
+        for field in fields {
+            let key = field.key.lowercased()
+            let path = normalize(field.path)
+            let value = normalize(field.stringValue ?? "")
+            if key == "thread_source", value == "subagent" { return true }
+            if path.contains("source_subagent") || path.contains("source.subagent") { return true }
+            if key == "model", value == "codex_auto_review" { return true }
+        }
+        return false
     }
 
     private func recognizeKinds(fields: [FieldValue]) -> [EventKind] {
@@ -497,6 +524,15 @@ final class StatusCollector {
     private func stringField(_ fields: [FieldValue], keys: [String]) -> String? {
         for field in fields where keys.contains(field.key.lowercased()) {
             if let value = field.stringValue, !value.isEmpty { return value }
+        }
+        return nil
+    }
+
+    private func firstStringField(_ fields: [FieldValue], orderedKeys: [String]) -> String? {
+        for key in orderedKeys {
+            if let value = stringField(fields, keys: [key]) {
+                return value
+            }
         }
         return nil
     }
