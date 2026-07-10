@@ -111,6 +111,8 @@ final class StatusCollector {
     private let isoParser = ISO8601DateFormatter()
     private let isoOutput = ISO8601DateFormatter()
     private var parsedCache: [String: (signature: FileSignature, parsed: ParsedSession)] = [:]
+    private var sessionCandidateCache: (loadedAt: Date, candidates: [SessionCandidate])?
+    private let sessionCandidateCacheTTL: TimeInterval = 12
 
     init(debugEnabled: Bool = false) {
         self.debugEnabled = debugEnabled
@@ -214,6 +216,19 @@ final class StatusCollector {
     }
 
     private func sessionCandidates(titleIndex: [String: String], debug: inout [String]) -> [SessionCandidate] {
+        let now = Date()
+        if let cache = sessionCandidateCache, now.timeIntervalSince(cache.loadedAt) < sessionCandidateCacheTTL {
+            debug.append("Session files found: \(cache.candidates.count) [cached]")
+            return cache.candidates.map { candidate in
+                SessionCandidate(
+                    url: candidate.url,
+                    threadID: candidate.threadID,
+                    title: candidate.threadID.flatMap { titleIndex[$0] } ?? candidate.title,
+                    modificationDate: candidate.modificationDate
+                )
+            }
+        }
+
         let sessionsURL = codexHome.appendingPathComponent("sessions")
         guard let enumerator = fileManager.enumerator(
             at: sessionsURL,
@@ -231,8 +246,10 @@ final class StatusCollector {
             let id = extractThreadID(from: url)
             candidates.append(SessionCandidate(url: url, threadID: id, title: id.flatMap { titleIndex[$0] }, modificationDate: values?.contentModificationDate))
         }
-        debug.append("Session files found: \(candidates.count)")
-        return candidates.sorted { ($0.modificationDate ?? .distantPast) > ($1.modificationDate ?? .distantPast) }
+        let sorted = candidates.sorted { ($0.modificationDate ?? .distantPast) > ($1.modificationDate ?? .distantPast) }
+        sessionCandidateCache = (now, sorted)
+        debug.append("Session files found: \(candidates.count) [fresh scan]")
+        return sorted
     }
 
     private func cachedParse(_ url: URL, debug: inout [String]) -> ParsedSession {
@@ -311,7 +328,7 @@ final class StatusCollector {
             if isInternalSubagentMarker(fields: fields) {
                 isInternalSubagent = true
             }
-            if let latestTokens = latestTokenCount(fields: fields) {
+            if let latestTokens = latestTokenCount(from: object, fields: fields) {
                 tokens = latestTokens
             }
             if let latestRateLimits = extractRateLimits(from: object) {
@@ -537,8 +554,26 @@ final class StatusCollector {
         return nil
     }
 
-    private func latestTokenCount(fields: [FieldValue]) -> String? {
-        for field in fields.reversed() where field.key.lowercased() == "total_tokens" {
+    private func latestTokenCount(from object: [String: Any], fields: [FieldValue]) -> String? {
+        if let payload = object["payload"] as? [String: Any],
+           let info = payload["info"] as? [String: Any],
+           let lastUsage = info["last_token_usage"] as? [String: Any],
+           let total = intValue(lastUsage["total_tokens"]),
+           total > 0 {
+            return "\(total)"
+        }
+
+        if let payload = object["payload"] as? [String: Any] {
+            for key in ["total_tokens", "token_count", "tokens"] {
+                if let total = intValue(payload[key]), total > 0 {
+                    return "\(total)"
+                }
+            }
+        }
+
+        for field in fields.reversed() where ["total_tokens", "token_count", "tokens"].contains(field.key.lowercased()) {
+            let path = normalize(field.path)
+            guard !path.contains("total_token_usage") else { continue }
             if let number = field.numberValue, number > 0 { return "\(Int(number))" }
         }
         return nil

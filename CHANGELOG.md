@@ -16,3 +16,6 @@
   active session file on each refresh.
 - Skipped internal Codex subagent review sessions when choosing the latest user-facing
   thread after newer Codex Desktop updates.
+- Cached session candidate scans briefly to reduce background I/O after Codex state grew.
+- Prefer `last_token_usage.total_tokens` for newer Codex `token_count` events so the UI
+  does not show cumulative lifetime token totals as the current thread token count.

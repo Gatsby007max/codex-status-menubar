@@ -1,0 +1,3 @@
+{"type":"session_meta","payload":{"id":"66666666-6666-6666-6666-666666666666","thread_name":"Fixture new token schema","model":"gpt-fixture"}}
+{"type":"event_msg","payload":{"type":"task_started"}}
+{"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":52241640,"cached_input_tokens":48795904,"output_tokens":182863,"reasoning_output_tokens":70354,"total_tokens":52424503},"last_token_usage":{"input_tokens":42377,"cached_input_tokens":1920,"output_tokens":448,"reasoning_output_tokens":330,"total_tokens":42825},"model_context_window":258400},"rate_limits":{"primary":{"used_percent":1,"window_minutes":300},"secondary":{"used_percent":35,"window_minutes":10080}}}}

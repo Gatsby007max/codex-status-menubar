@@ -22,6 +22,13 @@ assert_status() {
 assert_status idle Idle
 assert_status thinking Thinking
 assert_status failed Failed
+assert_status new-token-schema Thinking
+new_token_output="$(CODEX_HOME="$PWD/fixtures/new-token-schema" ./CodexStatusApp --once)"
+if ! grep -q '"tokens" : 42825' <<< "$new_token_output"; then
+  printf 'Expected new-token-schema fixture to report last_token_usage total_tokens 42825\n' >&2
+  printf '%s\n' "$new_token_output" >&2
+  exit 1
+fi
 assert_status empty "No Data"
 
 touch -t 202606040000 "fixtures/internal-subagent/sessions/2026/06/04/rollout-2026-06-04T00-00-00-44444444-4444-4444-4444-444444444444.jsonl"

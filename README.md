@@ -12,6 +12,7 @@ The app is external and read-only. It does not modify `Codex.app`, Pet files, bu
 - CLI snapshot mode with `--once`.
 - Verbose diagnostics with `--debug` or `--verbose`.
 - Polls local Codex state every 3 seconds by default.
+- Caches session candidate scans briefly to reduce background file-system work.
 - Supports `CODEX_STATUS_POLL_INTERVAL`, clamped from 1.5 to 30 seconds.
 - Reads `CODEX_HOME` first, then falls back to `~/.codex`.
 - Selects the latest session from `sessions/**/*.jsonl` by modification time.
@@ -99,6 +100,7 @@ Fixture examples:
 CODEX_HOME=fixtures/idle ./run.sh --once
 CODEX_HOME=fixtures/thinking ./run.sh --once
 CODEX_HOME=fixtures/failed ./run.sh --once
+CODEX_HOME=fixtures/new-token-schema ./run.sh --once
 CODEX_HOME=fixtures/empty ./run.sh --once
 ```
 
@@ -140,6 +142,7 @@ When uncertain, the detector prefers `Idle` over `Waiting`.
 
 - If the status looks stale, run `./run.sh --once --debug` and check which JSONL session was selected.
 - If no rate bar appears, the selected session may not include `payload.rate_limits`.
+- If token count is unexpectedly huge, confirm the selected event has `payload.info.last_token_usage.total_tokens`; newer Codex builds also write cumulative `total_token_usage`, which this app intentionally avoids for the displayed token count.
 - If the Desktop app does not launch after double-clicking, re-run `./install-desktop-launcher.sh`.
 - If build output appears in Git, confirm `.swift-module-cache/`, `CodexStatusApp`, and generated app-bundle binaries are ignored.
 - If the app cannot read Codex state, try `CODEX_HOME=/path/to/fixture ./run.sh --once --debug`.
