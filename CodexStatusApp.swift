@@ -17,6 +17,7 @@ struct StatusSnapshot {
     let tokens: String
     let rateLimitRemaining: String
     let rateLimitReset: String
+    let rateLimitWindows: [RateLimitWindow]
     let primaryRateRemainingPercent: Double?
     let secondaryRateRemainingPercent: Double?
     let lastActivity: String
@@ -34,6 +35,7 @@ struct StatusSnapshot {
             "lastActivity": lastActivity,
             "sourceFile": sourceFile,
         ]
+        object["rateLimits"] = rateLimitWindows.map { $0.jsonObject() }
         object["primaryRateRemainingPercent"] = primaryRateRemainingPercent ?? "Unknown"
         object["secondaryRateRemainingPercent"] = secondaryRateRemainingPercent ?? "Unknown"
         return object
@@ -70,11 +72,53 @@ struct RecognizedEvent {
     let summary: String
 }
 
+struct RateLimitWindow {
+    let sourceKey: String
+    let label: String
+    let windowMinutes: Int?
+    let remainingPercent: Double?
+    let usedPercent: Double?
+    let reset: String?
+
+    func jsonObject() -> [String: Any] {
+        var object: [String: Any] = [
+            "source": sourceKey,
+            "label": label,
+        ]
+        object["windowMinutes"] = windowMinutes ?? "Unknown"
+        object["remainingPercent"] = remainingPercent ?? "Unknown"
+        object["usedPercent"] = usedPercent ?? "Unknown"
+        object["reset"] = reset ?? "Unknown"
+        return object
+    }
+}
+
 struct RateLimitSnapshot {
-    let remaining: String
-    let resets: String
-    let primaryRemainingPercent: Double?
-    let secondaryRemainingPercent: Double?
+    let windows: [RateLimitWindow]
+
+    var remaining: String {
+        let parts = windows.compactMap { window -> String? in
+            guard let remainingPercent = window.remainingPercent else { return nil }
+            return "\(window.label): \(formatPercent(remainingPercent)) left"
+        }
+        return parts.isEmpty ? "Unknown" : parts.joined(separator: " / ")
+    }
+
+    var resets: String {
+        let parts = windows.compactMap { window -> String? in
+            guard let reset = window.reset else { return nil }
+            return "\(window.label): \(reset)"
+        }
+        return parts.isEmpty ? "Unknown" : parts.joined(separator: " / ")
+    }
+
+    var primaryRemainingPercent: Double? { windows.first?.remainingPercent }
+    var secondaryRemainingPercent: Double? { windows.dropFirst().first?.remainingPercent }
+
+    private func formatPercent(_ value: Double) -> String {
+        if value.rounded() == value { return "\(Int(value))%" }
+        return String(format: "%.1f%%", value)
+    }
 }
 
 struct ParsedSession {
@@ -163,6 +207,7 @@ final class StatusCollector {
                 tokens: parsed.tokens ?? "Unknown",
                 rateLimitRemaining: parsed.rateLimits?.remaining ?? "Unknown",
                 rateLimitReset: parsed.rateLimits?.resets ?? "Unknown",
+                rateLimitWindows: parsed.rateLimits?.windows ?? [],
                 primaryRateRemainingPercent: parsed.rateLimits?.primaryRemainingPercent,
                 secondaryRateRemainingPercent: parsed.rateLimits?.secondaryRemainingPercent,
                 lastActivity: formatDate(lastActivity),
@@ -182,6 +227,7 @@ final class StatusCollector {
             tokens: "Unknown",
             rateLimitRemaining: "Unknown",
             rateLimitReset: "Unknown",
+            rateLimitWindows: [],
             primaryRateRemainingPercent: nil,
             secondaryRateRemainingPercent: nil,
             lastActivity: "Unknown",
@@ -582,33 +628,38 @@ final class StatusCollector {
     private func extractRateLimits(from object: [String: Any]) -> RateLimitSnapshot? {
         guard let payload = object["payload"] as? [String: Any],
               let rateLimits = payload["rate_limits"] as? [String: Any] else { return nil }
-        let primary = rateLimitPart(label: "5h", value: rateLimits["primary"])
-        let secondary = rateLimitPart(label: "7D", value: rateLimits["secondary"])
-        let remainingParts = [primary.remaining, secondary.remaining].compactMap { $0 }
-        let resetParts = [primary.reset, secondary.reset].compactMap { $0 }
-        guard !remainingParts.isEmpty || !resetParts.isEmpty else { return nil }
-        return RateLimitSnapshot(
-            remaining: remainingParts.isEmpty ? "Unknown" : remainingParts.joined(separator: " / "),
-            resets: resetParts.isEmpty ? "Unknown" : resetParts.joined(separator: " / "),
-            primaryRemainingPercent: primary.remainingPercent,
-            secondaryRemainingPercent: secondary.remainingPercent
-        )
+        let orderedKeys = ["primary", "secondary"] + rateLimits.keys.sorted().filter { $0 != "primary" && $0 != "secondary" }
+        var windows: [(order: Int, window: RateLimitWindow)] = []
+        for (order, key) in orderedKeys.enumerated() {
+            guard let window = rateLimitWindow(sourceKey: key, value: rateLimits[key]) else { continue }
+            windows.append((order, window))
+        }
+        let sorted = windows.sorted {
+            let leftMinutes = $0.window.windowMinutes ?? Int.max
+            let rightMinutes = $1.window.windowMinutes ?? Int.max
+            if leftMinutes != rightMinutes { return leftMinutes < rightMinutes }
+            return $0.order < $1.order
+        }.map(\.window)
+        guard !sorted.isEmpty else { return nil }
+        return RateLimitSnapshot(windows: sorted)
     }
 
-    private func rateLimitPart(label fallbackLabel: String, value: Any?) -> (remaining: String?, reset: String?, remainingPercent: Double?) {
-        guard let dictionary = value as? [String: Any] else { return (nil, nil, nil) }
-        let label = rateWindowLabel(minutes: intValue(dictionary["window_minutes"])) ?? fallbackLabel
-        var remaining: String?
-        var remainingPercent: Double?
-        if let used = doubleValue(dictionary["used_percent"]) {
-            remainingPercent = min(100, max(0, 100 - used))
-            remaining = "\(label): \(formatPercent(remainingPercent ?? 0)) left"
-        }
-        var reset: String?
-        if let resetEpoch = doubleValue(dictionary["resets_at"]) {
-            reset = "\(label): \(formatDate(Date(timeIntervalSince1970: resetEpoch)))"
-        }
-        return (remaining, reset, remainingPercent)
+    private func rateLimitWindow(sourceKey: String, value: Any?) -> RateLimitWindow? {
+        guard let dictionary = value as? [String: Any] else { return nil }
+        let windowMinutes = intValue(dictionary["window_minutes"])
+        let label = rateWindowLabel(minutes: windowMinutes) ?? sourceKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        let usedPercent = doubleValue(dictionary["used_percent"])
+        let remainingPercent = usedPercent.map { min(100, max(0, 100 - $0)) }
+        let reset = doubleValue(dictionary["resets_at"]).map { formatDate(Date(timeIntervalSince1970: $0)) }
+        guard remainingPercent != nil || reset != nil || windowMinutes != nil else { return nil }
+        return RateLimitWindow(
+            sourceKey: sourceKey,
+            label: label.isEmpty ? "Limit" : label,
+            windowMinutes: windowMinutes,
+            remainingPercent: remainingPercent,
+            usedPercent: usedPercent,
+            reset: reset
+        )
     }
 
     private func rateWindowLabel(minutes: Int?) -> String? {
@@ -764,8 +815,15 @@ final class DesktopWidgetView: NSView {
         drawText("Codex", x: 18, y: 15, width: 90, size: 16, weight: .bold, alpha: 1)
         drawStatus()
         drawText(snapshot.threadTitle, x: 18, y: 43, width: bounds.width - 36, size: 12, weight: .regular, alpha: 0.72)
-        drawBar(label: "5h", percent: snapshot.primaryRateRemainingPercent, y: 78)
-        drawBar(label: "7D", percent: snapshot.secondaryRateRemainingPercent, y: 110)
+        let windows = Array(snapshot.rateLimitWindows.prefix(2))
+        if windows.count == 1 {
+            drawBar(label: windows[0].label, percent: windows[0].remainingPercent, y: 94)
+        } else if windows.count >= 2 {
+            drawBar(label: windows[0].label, percent: windows[0].remainingPercent, y: 78)
+            drawBar(label: windows[1].label, percent: windows[1].remainingPercent, y: 110)
+        } else {
+            drawBar(label: "Rate", percent: nil, y: 94)
+        }
         drawText("Updated \(snapshot.lastActivity)", x: 18, y: 143, width: bounds.width - 36, size: 11, weight: .regular, alpha: 0.58, monospaced: true)
     }
 
@@ -1068,8 +1126,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func addRateLimitItems(_ snapshot: StatusSnapshot, to menu: NSMenu) {
         addInfoItem("Rate remaining", snapshot.rateLimitRemaining, to: menu, emphasized: true)
-        if let primary = snapshot.primaryRateRemainingPercent { addBar(label: "5h", percent: primary, to: menu) }
-        if let secondary = snapshot.secondaryRateRemainingPercent { addBar(label: "7D", percent: secondary, to: menu) }
+        for window in snapshot.rateLimitWindows {
+            if let percent = window.remainingPercent {
+                addBar(label: window.label, percent: percent, to: menu)
+            }
+        }
     }
 
     private func addBar(label: String, percent: Double, to menu: NSMenu) {

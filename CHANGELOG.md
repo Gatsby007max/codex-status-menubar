@@ -19,3 +19,5 @@
 - Cached session candidate scans briefly to reduce background I/O after Codex state grew.
 - Prefer `last_token_usage.total_tokens` for newer Codex `token_count` events so the UI
   does not show cumulative lifetime token totals as the current thread token count.
+- Redesigned rate-limit extraction around dynamic windows so newer Codex builds that only
+  publish a 7D `primary` window no longer synthesize a missing 5h bar.

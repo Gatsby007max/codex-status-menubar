@@ -19,7 +19,7 @@ The app is external and read-only. It does not modify `Codex.app`, Pet files, bu
 - Uses `session_index.jsonl` as supplemental title metadata.
 - Ignores malformed JSONL lines and keeps running.
 - Shows status: `Thinking`, `Running`, `Waiting`, `Idle`, `Failed`, or `No Data`.
-- Shows 5h and 7D rate-limit remaining values when present in the JSONL payload.
+- Shows whichever rate-limit windows are present in the JSONL payload.
 - Includes a pseudo desktop widget that can be started or stopped from the menu.
 - Shows a Pet-style text bubble when work transitions from active to stopped.
 
@@ -101,6 +101,7 @@ CODEX_HOME=fixtures/idle ./run.sh --once
 CODEX_HOME=fixtures/thinking ./run.sh --once
 CODEX_HOME=fixtures/failed ./run.sh --once
 CODEX_HOME=fixtures/new-token-schema ./run.sh --once
+CODEX_HOME=fixtures/rate-limit-single-7d ./run.sh --once
 CODEX_HOME=fixtures/empty ./run.sh --once
 ```
 
@@ -141,7 +142,8 @@ When uncertain, the detector prefers `Idle` over `Waiting`.
 ## Troubleshooting
 
 - If the status looks stale, run `./run.sh --once --debug` and check which JSONL session was selected.
-- If no rate bar appears, the selected session may not include `payload.rate_limits`.
+- If a rate window such as 5h is missing, inspect `payload.rate_limits`; newer Codex builds may only publish a 7D window.
+- If no rate bar appears, the selected session may not include any parseable `payload.rate_limits` windows.
 - If token count is unexpectedly huge, confirm the selected event has `payload.info.last_token_usage.total_tokens`; newer Codex builds also write cumulative `total_token_usage`, which this app intentionally avoids for the displayed token count.
 - If the Desktop app does not launch after double-clicking, re-run `./install-desktop-launcher.sh`.
 - If build output appears in Git, confirm `.swift-module-cache/`, `CodexStatusApp`, and generated app-bundle binaries are ignored.

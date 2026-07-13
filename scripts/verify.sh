@@ -29,6 +29,18 @@ if ! grep -q '"tokens" : 42825' <<< "$new_token_output"; then
   printf '%s\n' "$new_token_output" >&2
   exit 1
 fi
+assert_status rate-limit-single-7d Running
+single_7d_output="$(CODEX_HOME="$PWD/fixtures/rate-limit-single-7d" ./CodexStatusApp --once)"
+if ! grep -q '"rateLimitRemaining" : "7D: 96% left"' <<< "$single_7d_output"; then
+  printf 'Expected rate-limit-single-7d fixture to report only the 7D window\n' >&2
+  printf '%s\n' "$single_7d_output" >&2
+  exit 1
+fi
+if grep -q '5h' <<< "$single_7d_output"; then
+  printf 'Did not expect rate-limit-single-7d fixture to synthesize a 5h window\n' >&2
+  printf '%s\n' "$single_7d_output" >&2
+  exit 1
+fi
 assert_status empty "No Data"
 
 touch -t 202606040000 "fixtures/internal-subagent/sessions/2026/06/04/rollout-2026-06-04T00-00-00-44444444-4444-4444-4444-444444444444.jsonl"
