@@ -13,6 +13,7 @@ The app is external and read-only. It does not modify `Codex.app`, Pet files, bu
 - Verbose diagnostics with `--debug` or `--verbose`.
 - Polls local Codex state every 3 seconds by default.
 - Caches session candidate scans briefly to reduce background file-system work.
+- Reuses unchanged UI state between polls to avoid unnecessary menu/widget redraws.
 - Supports `CODEX_STATUS_POLL_INTERVAL`, clamped from 1.5 to 30 seconds.
 - Reads `CODEX_HOME` first, then falls back to `~/.codex`.
 - Selects the latest session from `sessions/**/*.jsonl` by modification time.

@@ -21,3 +21,5 @@
   does not show cumulative lifetime token totals as the current thread token count.
 - Redesigned rate-limit extraction around dynamic windows so newer Codex builds that only
   publish a 7D `primary` window no longer synthesize a missing 5h bar.
+- Cached `session_index.jsonl` reads and skipped unchanged UI rebuilds so the menu app
+  keeps polling reliably during long-running Codex sessions.

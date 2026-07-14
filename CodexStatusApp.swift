@@ -24,6 +24,25 @@ struct StatusSnapshot {
     let sourceFile: String
     let reason: String
 
+    var displayKey: String {
+        let windows = rateLimitWindows.map { window -> String in
+            let percent = window.remainingPercent.map { String($0) } ?? "Unknown"
+            return "\(window.label):\(percent):\(window.reset ?? "Unknown")"
+        }.joined(separator: "|")
+        let parts: [String] = [
+            status.rawValue,
+            threadTitle,
+            model,
+            tokens,
+            rateLimitRemaining,
+            rateLimitReset,
+            windows,
+            lastActivity,
+            sourceFile,
+        ]
+        return parts.joined(separator: "\u{1f}")
+    }
+
     func jsonObject() -> [String: Any] {
         var object: [String: Any] = [
             "status": status.rawValue,
@@ -155,6 +174,7 @@ final class StatusCollector {
     private let isoParser = ISO8601DateFormatter()
     private let isoOutput = ISO8601DateFormatter()
     private var parsedCache: [String: (signature: FileSignature, parsed: ParsedSession)] = [:]
+    private var sessionIndexCache: (signature: FileSignature, titles: [String: String], validCount: Int)?
     private var sessionCandidateCache: (loadedAt: Date, candidates: [SessionCandidate])?
     private let sessionCandidateCacheTTL: TimeInterval = 12
 
@@ -238,8 +258,14 @@ final class StatusCollector {
 
     private func sessionIndex(debug: inout [String]) -> [String: String] {
         let indexURL = codexHome.appendingPathComponent("session_index.jsonl")
+        let signature = fileSignature(for: indexURL)
+        if let cache = sessionIndexCache, cache.signature == signature {
+            debug.append("Valid session_index records: \(cache.validCount) [cached]")
+            return cache.titles
+        }
         guard let contents = try? String(contentsOf: indexURL, encoding: .utf8) else {
             debug.append("session_index.jsonl missing or unreadable; title lookup unavailable.")
+            sessionIndexCache = nil
             return [:]
         }
 
@@ -258,6 +284,7 @@ final class StatusCollector {
             }
         }
         debug.append("Valid session_index records: \(validCount)")
+        sessionIndexCache = (signature, titles, validCount)
         return titles
     }
 
@@ -932,11 +959,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         scheduleRefresh(queueIfBusy: true)
     }
 
-    private func scheduleRefresh(queueIfBusy: Bool) {
+    private func scheduleRefresh(queueIfBusy _: Bool) {
         guard !isRefreshInFlight else {
-            if queueIfBusy {
-                pendingRefreshAfterCurrent = true
-            }
+            pendingRefreshAfterCurrent = true
             return
         }
 
@@ -959,9 +984,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func apply(snapshot: StatusSnapshot, debugLines: [String]) {
         let previousSnapshot = lastSnapshot
         if debugEnabled { writeDebug(debugLines) }
-        configureStatusButton(for: snapshot)
-        statusItem.menu = menu(for: snapshot)
-        updateDesktopWidget(with: snapshot)
+        let displayChanged = previousSnapshot?.displayKey != snapshot.displayKey
+        if displayChanged {
+            configureStatusButton(for: snapshot)
+            statusItem.menu = menu(for: snapshot)
+            updateDesktopWidget(with: snapshot)
+        }
         showPetTextIfWorkStopped(from: previousSnapshot, to: snapshot)
         lastSnapshot = snapshot
     }
